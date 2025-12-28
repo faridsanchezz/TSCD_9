@@ -118,28 +118,35 @@ jobs:
 
       - name: Check coverage threshold (>= 80%)
         run: |
-          THRESHOLD=80
+         set -e
 
-          # En jacoco.xml existe un atributo line-rate en <report ...> (rate 0.0 - 1.0)
-          COVERAGE=$(grep -Po '<line-rate>\K[0-9.]+' reports/jacoco.xml | head -n 1 | awk '{print $1 * 100}')
+         THRESHOLD=80
+          XML="reports/jacoco.xml"
 
-          # Fallback: si el grep anterior no devolvió nada (por formato distinto), intenta con atributo line-rate="..."
-          if [ -z "$COVERAGE" ] || [ "$COVERAGE" = "0" ]; then
-            RATE=$(grep -Po 'line-rate="\K[0-9.]+' reports/jacoco.xml | head -n 1 || true)
-            if [ -n "$RATE" ]; then
-              COVERAGE=$(echo "$RATE" | awk '{print $1 * 100}')
-            fi
+          # El resumen global suele estar al final del XML
+          LINE=$(grep -oE '<counter type="INSTRUCTION" missed="[0-9]+" covered="[0-9]+"\s*/>' "$XML" | tail -n 1)
+
+          if [ -z "$LINE" ]; then
+           echo "Error: Could not find INSTRUCTION counter in $XML"
+           echo "Showing counters found:"
+           grep -n 'counter type="INSTRUCTION"' "$XML" | head -n 50 || true
+           exit 1
           fi
 
-          if [ -z "$COVERAGE" ]; then
-            echo "Error: Could not parse coverage from reports/jacoco.xml"
-            exit 1
-          fi
+         MISSED=$(echo "$LINE"  | grep -oE 'missed="[0-9]+"'  | grep -oE '[0-9]+')
+          COVERED=$(echo "$LINE" | grep -oE 'covered="[0-9]+"' | grep -oE '[0-9]+')
+          TOTAL=$((MISSED + COVERED))
 
-          echo "Coverage detected: ${COVERAGE}%"
-          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+          COVERAGE=$(awk -v c="$COVERED" -v t="$TOTAL" 'BEGIN { printf "%.2f", (c/t)*100 }')
+
+          echo "Instructions missed:  $MISSED"
+          echo "Instructions covered: $COVERED"
+          echo "Coverage:             ${COVERAGE}%"
+
+          if awk -v cov="$COVERAGE" -v thr="$THRESHOLD" 'BEGIN { exit !(cov < thr) }'; then
             echo "Coverage below threshold: ${COVERAGE}% (required >= ${THRESHOLD}%)"
             exit 1
           fi
 
           echo "Coverage meets the threshold: ${COVERAGE}% (required >= ${THRESHOLD}%)"
+
