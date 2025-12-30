@@ -26,7 +26,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # (1) Mostrar contexto de GitHub (github.*)
       - name: Mostrar contexto de GitHub
         run: |
           echo "Repo:        ${{ github.repository }}"
@@ -37,8 +36,7 @@ jobs:
           echo "Workflow:    ${{ github.workflow }}"
           echo "Run:         ${{ github.run_id }} (#${{ github.run_number }})"
 
-      # (3) Info del runner (runner.*)
-      - name: Info del runner
+      - name: Información del runner
         run: |
           echo "OS:         ${{ runner.os }}"
           echo "Arch:       ${{ runner.arch }}"
@@ -60,23 +58,6 @@ jobs:
             exit 1
           fi
 
-      - name: Extract Maven coordinates (groupId, artifactId, version)
-        id: maven_coords
-        run: |
-          GROUP=$(mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout)
-          ARTIFACT=$(mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout)
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-
-          echo "group=${GROUP}" >> $GITHUB_OUTPUT
-          echo "artifact=${ARTIFACT}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-
-          echo "Detected coordinates:"
-          echo "  groupId=${GROUP}"
-          echo "  artifactId=${ARTIFACT}"
-          echo "  version=${VERSION}"
-
-      # (4) Mostrar outputs del step (steps.*)
       - name: Mostrar outputs de maven_coords (steps context)
         run: |
           echo "group   = ${{ steps.maven_coords.outputs.group }}"
@@ -153,7 +134,6 @@ jobs:
         run: |
           set -e
 
-          # Si el workflow se lanzó manualmente, usa inputs; si no, usa env.
           THRESHOLD="${{ inputs.coverage_threshold || vars.COVERAGE_THRESHOLD }}"
           XML="reports/jacoco.xml"
 
