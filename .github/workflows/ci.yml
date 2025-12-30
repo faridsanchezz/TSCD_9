@@ -4,6 +4,14 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      coverage_threshold:
+        description: "Umbral mínimo de cobertura"
+        required: true
+        default: "80"
+
+env:
+  JAVA_VERSION: "21"
 
 jobs:
   archetype:
@@ -18,10 +26,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      # (1) Mostrar contexto de GitHub (github.*)
+      - name: Mostrar contexto de GitHub
+        run: |
+          echo "Repo:        ${{ github.repository }}"
+          echo "Evento:      ${{ github.event_name }}"
+          echo "Actor:       ${{ github.actor }}"
+          echo "Ref:         ${{ github.ref }}"
+          echo "SHA:         ${{ github.sha }}"
+          echo "Workflow:    ${{ github.workflow }}"
+          echo "Run:         ${{ github.run_id }} (#${{ github.run_number }})"
+
+      # (3) Info del runner (runner.*)
+      - name: Info del runner
+        run: |
+          echo "OS:         ${{ runner.os }}"
+          echo "Arch:       ${{ runner.arch }}"
+          echo "Temp:       ${{ runner.temp }}"
+          echo "Tool cache: ${{ runner.tool_cache }}"
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
-          java-version: "21"
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: "temurin"
 
       - name: Verify pom.xml exists
@@ -49,6 +76,13 @@ jobs:
           echo "  artifactId=${ARTIFACT}"
           echo "  version=${VERSION}"
 
+      # (4) Mostrar outputs del step (steps.*)
+      - name: Mostrar outputs de maven_coords (steps context)
+        run: |
+          echo "group   = ${{ steps.maven_coords.outputs.group }}"
+          echo "artifact= ${{ steps.maven_coords.outputs.artifact }}"
+          echo "version = ${{ steps.maven_coords.outputs.version }}"
+
   build:
     runs-on: ubuntu-22.04
     needs: archetype
@@ -57,10 +91,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
-          java-version: "21"
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: "temurin"
 
       - name: Restore Maven dependencies cache
@@ -75,14 +109,12 @@ jobs:
       - name: Build, test, package and verify (JaCoCo runs here)
         run: mvn clean compile test package verify
 
-      # Guarda el JAR resultante (ajustado a las coordenadas Maven)
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: jar-${{ needs.archetype.outputs.artifact }}-${{ needs.archetype.outputs.version }}
           path: target/${{ needs.archetype.outputs.artifact }}-${{ needs.archetype.outputs.version }}.jar
 
-      # Guarda el reporte de cobertura (HTML + XML)
       - name: Upload JaCoCo report artifact
         uses: actions/upload-artifact@v4
         with:
@@ -94,10 +126,10 @@ jobs:
     needs: build
 
     steps:
-      - name: Set up JDK 21
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
-          java-version: "21"
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: "temurin"
 
       - name: Download JaCoCo report artifact
@@ -116,32 +148,35 @@ jobs:
             exit 1
           fi
 
-      - name: Check coverage threshold (>= 80%)
+      # (5) Usar inputs.coverage_threshold en workflow_dispatch
+      - name: Check coverage threshold (>= configured)
         run: |
-         set -e
+          set -e
 
-         THRESHOLD=80
+          # Si el workflow se lanzó manualmente, usa inputs; si no, usa env.
+          THRESHOLD="${{ inputs.coverage_threshold || vars.COVERAGE_THRESHOLD }}"
           XML="reports/jacoco.xml"
 
-          # El resumen global suele estar al final del XML
-          LINE=$(grep -oE '<counter type="INSTRUCTION" missed="[0-9]+" covered="[0-9]+"\s*/>' "$XML" | tail -n 1)
+          echo "Threshold configured: ${THRESHOLD}%"
 
-          if [ -z "$LINE" ]; then
-           echo "Error: Could not find INSTRUCTION counter in $XML"
-           echo "Showing counters found:"
-           grep -n 'counter type="INSTRUCTION"' "$XML" | head -n 50 || true
-           exit 1
+          COUNTER=$(grep -oE '<counter type="LINE" missed="[0-9]+" covered="[0-9]+"\s*/>' "$XML" | tail -n 1)
+
+          if [ -z "$COUNTER" ]; then
+            echo "Error: Could not find LINE counter in $XML"
+            echo "Showing available counters:"
+            grep -n '<counter type="' "$XML" | head -n 50 || true
+            exit 1
           fi
 
-         MISSED=$(echo "$LINE"  | grep -oE 'missed="[0-9]+"'  | grep -oE '[0-9]+')
-          COVERED=$(echo "$LINE" | grep -oE 'covered="[0-9]+"' | grep -oE '[0-9]+')
+          MISSED=$(echo "$COUNTER"  | grep -oE 'missed="[0-9]+"'  | grep -oE '[0-9]+')
+          COVERED=$(echo "$COUNTER" | grep -oE 'covered="[0-9]+"' | grep -oE '[0-9]+')
           TOTAL=$((MISSED + COVERED))
 
           COVERAGE=$(awk -v c="$COVERED" -v t="$TOTAL" 'BEGIN { printf "%.2f", (c/t)*100 }')
 
-          echo "Instructions missed:  $MISSED"
-          echo "Instructions covered: $COVERED"
-          echo "Coverage:             ${COVERAGE}%"
+          echo "Lines missed:   $MISSED"
+          echo "Lines covered:  $COVERED"
+          echo "Line coverage:  ${COVERAGE}%"
 
           if awk -v cov="$COVERAGE" -v thr="$THRESHOLD" 'BEGIN { exit !(cov < thr) }'; then
             echo "Coverage below threshold: ${COVERAGE}% (required >= ${THRESHOLD}%)"
@@ -149,4 +184,3 @@ jobs:
           fi
 
           echo "Coverage meets the threshold: ${COVERAGE}% (required >= ${THRESHOLD}%)"
-
