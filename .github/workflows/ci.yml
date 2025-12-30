@@ -57,9 +57,23 @@ jobs:
             echo "Error: pom.xml not found."
             exit 1
           fi
+      
 
-      - name: Mostrar outputs de maven_coords (steps context)
+      - name: Extraer identificador de artefacto Maven
+        id: maven_coords
         run: |
+          GROUP=$(mvn -B help:evaluate -Dexpression=project.groupId -DforceStdout | grep -v '^\[INFO\]' | tail -n 1)
+          ARTIFACT=$(mvn -B help:evaluate -Dexpression=project.artifactId -DforceStdout | grep -v '^\[INFO\]' | tail -n 1)
+          VERSION=$(mvn -B help:evaluate -Dexpression=project.version -DforceStdout | grep -v '^\[INFO\]' | tail -n 1)
+
+          echo "group=${GROUP}" >> "$GITHUB_OUTPUT"
+          echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+
+      - name: Mostrar identificador de artefacto Maven
+        run: |
+          echo "group=software.ulpgc" >> $GITHUB_OUTPUT
           echo "group   = ${{ steps.maven_coords.outputs.group }}"
           echo "artifact= ${{ steps.maven_coords.outputs.artifact }}"
           echo "version = ${{ steps.maven_coords.outputs.version }}"
@@ -134,7 +148,7 @@ jobs:
         run: |
           set -e
 
-          THRESHOLD="${{ inputs.coverage_threshold || vars.COVERAGE_THRESHOLD }}"
+          THRESHOLD="${{ inputs.coverage_threshold || vars.CI_MIN_COVERAGE }}"
           XML="reports/jacoco.xml"
 
           echo "Threshold configured: ${THRESHOLD}%"
